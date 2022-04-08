@@ -6,8 +6,9 @@ from keras.models import Sequential
 from keras.layers import Dense, Dropout, Conv2D, MaxPooling2D, Activation, Flatten
 from keras.callbacks import TensorBoard
 import tensorflow as tf
-from keras.optimizer_v1 import adam
-#from tensorflow.keras.optimizers import Adam
+tf.compat.v1.enable_eager_execution()
+#from keras.optimizer_v1 import adam
+from tensorflow.keras.optimizers import Adam
 from collections import deque
 import time
 import random
@@ -171,25 +172,39 @@ class ModifiedTensorBoard(TensorBoard):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.step = 1
-        self.writer = tf.summary.FileWriter(self.log_dir)
+        self.model = None
+        self.TB_graph = tf.compat.v1.Graph()
+        with self.TB_graph.as_default():
+            self.writer = tf.summary.create_file_writer(self.log_dir, flush_millis=5000)
+            self.writer.set_as_default()
+            self.all_summary_ops = tf.compat.v1.summary.all_v2_summary_ops()
+        self.TB_sess = tf.compat.v1.InteractiveSession(graph=self.TB_graph)
+        self.TB_sess.run(self.writer.init())
 
     # Overriding this method to stop creating default log writer
     def set_model(self, model):
-        pass
+        self.model = model
+        self._train_dir = self.log_dir + '\\train'
 
     # Overrided, saves logs with our step number
     # (otherwise every .fit() will start writing from 0th step)
     def on_epoch_end(self, epoch, logs=None):
         self.update_stats(**logs)
- 
- 
+
     # Overrided
     # We train for one batch only, no need to save anything at epoch end
     def on_batch_end(self, batch, logs=None):
         pass
 
+    def on_train_begin(self, logs=None):
+        pass
+    
     # Overrided, so won't close writer
     def on_train_end(self, _):
+        pass
+
+    # added for performance?
+    def on_train_batch_end(self, _, __):
         pass
 
     # Custom method for saving own metrics
@@ -197,6 +212,13 @@ class ModifiedTensorBoard(TensorBoard):
     def update_stats(self, **stats):
         self._write_logs(stats, self.step)
 
+    def _write_logs(self, logs, index):
+        for name, value in logs.items():
+            self.TB_sess.run(self.all_summary_ops)
+            if self.model is not None:
+                name = f'{name}_{self.model.name}'
+            self.TB_sess.run(tf.summary.scalar(name, value, step=index))
+        self.model = None
 class DQNAgent:
     
     def __init__(self):
@@ -223,7 +245,7 @@ class DQNAgent:
             tf.keras.layers.Dense(units=24, activation=tf.nn.relu),
             tf.keras.layers.Dense(2, activation=tf.nn.softmax)#maby not right...
             ])
-        model.compile(loss="mse", optimizer=adam(lr=.001), metrics=['accuracy'])
+        model.compile(loss="mse", optimizer=Adam(lr=.001), metrics=['accuracy'])
 
         return model
     
@@ -313,7 +335,7 @@ for episode in tqdm(range(1, EPISODES + 1), ascii=True, unit='episodes'):
             action = np.argmax(agent.get_qs(current_state))
         else:
             # Get random action
-            action = np.random.randint(0, sim.ACTION_SPACE_SIZE)
+            action = np.random.randint(0, 1)
 
         new_state, reward, done = sim.step(action)
 
