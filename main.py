@@ -6,6 +6,9 @@ from keras.models import Sequential
 from keras.layers import Dense, Dropout, Conv2D, MaxPooling2D, Activation, Flatten
 from keras.callbacks import TensorBoard
 import tensorflow as tf
+
+
+tf.compat.v1.enable_eager_execution()
 #from keras.optimizer_v1 import adam
 from tensorflow.keras.optimizers import Adam
 from collections import deque
@@ -19,6 +22,7 @@ import numpy as np
 plt.style.use('_mpl-gallery')
 from PIL import Image
 import cv2
+
 
 #shit
 DISCOUNT = 0.99

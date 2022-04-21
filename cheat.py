@@ -1,9 +1,10 @@
 import numpy as np
+#import keras.backend.tensorflow_backend as backend
 from keras.models import Sequential
 from keras.layers import Dense, Dropout, Conv2D, MaxPooling2D, Activation, Flatten
+from tensorflow.keras.optimizers import Adam
 from keras.callbacks import TensorBoard
 import tensorflow as tf
-from tensorflow.keras.optimizers import Adam
 from collections import deque
 import time
 import random
@@ -199,38 +200,57 @@ if not os.path.isdir('models'):
 # Own Tensorboard class
 class ModifiedTensorBoard(TensorBoard):
     
+    # Overriding init to set initial step and writer (we want one log file for all .fit() calls)
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.step = 1
-        self.writer = tf.summary.create_file_writer(self.log_dir)
-        self._log_write_dir = self.log_dir
+        self.model = None
+        self.TB_graph = tf.compat.v1.Graph()
+        with self.TB_graph.as_default():
+            self.writer = tf.summary.create_file_writer(self.log_dir, flush_millis=5000)
+            self.writer.set_as_default()
+            self.all_summary_ops = tf.compat.v1.summary.all_v2_summary_ops()
+        self.TB_sess = tf.compat.v1.InteractiveSession(graph=self.TB_graph)
+        self.TB_sess.run(self.writer.init())
 
+    # Overriding this method to stop creating default log writer
     def set_model(self, model):
         self.model = model
+        self._train_dir = self.log_dir + '\\train'
 
-        self._train_dir = os.path.join(self._log_write_dir, 'train')
-        self._train_step = self.model._train_counter
-
-        self._val_dir = os.path.join(self._log_write_dir, 'validation')
-        self._val_step = self.model._test_counter
-
-        self._should_write_train_graph = False
-
+    # Overrided, saves logs with our step number
+    # (otherwise every .fit() will start writing from 0th step)
     def on_epoch_end(self, epoch, logs=None):
         self.update_stats(**logs)
 
+    # Overrided
+    # We train for one batch only, no need to save anything at epoch end
     def on_batch_end(self, batch, logs=None):
         pass
 
+    def on_train_begin(self, logs=None):
+        pass
+    
+    # Overrided, so won't close writer
     def on_train_end(self, _):
         pass
 
-    def update_stats(self, **stats):
-        with self.writer.as_default():
-            for key, value in stats.items():
-                tf.summary.scalar(key, value, step = self.step)
-                self.writer.flush()
+    # added for performance?
+    def on_train_batch_end(self, _, __):
+        pass
 
+    # Custom method for saving own metrics
+    # Creates writer, writes custom metrics and closes writer
+    def update_stats(self, **stats):
+        self._write_logs(stats, self.step)
+
+    def _write_logs(self, logs, index):
+        for name, value in logs.items():
+            self.TB_sess.run(self.all_summary_ops)
+            if self.model is not None:
+                name = f'{name}_{self.model.name}'
+            self.TB_sess.run(tf.summary.scalar(name, value, step=index))
+        self.model = None
 
 # Agent class
 class DQNAgent:
@@ -254,6 +274,7 @@ class DQNAgent:
 
     def create_model(self):
         model = Sequential()
+        model.call = tf.function(model.call)
 
         model.add(Conv2D(256, (3, 3), input_shape=env.OBSERVATION_SPACE_VALUES))  # OBSERVATION_SPACE_VALUES = (10, 10, 3) a 10x10 RGB image.
         model.add(Activation('relu'))
